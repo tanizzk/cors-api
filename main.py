@@ -12,10 +12,13 @@ import yaml
 
 from dotenv import dotenv_values
 
+
 app = FastAPI()
 
-# CORS (allow all for this assignment)
-from fastapi.middleware.cors import CORSMiddleware
+
+# -----------------------------
+# CORS
+# -----------------------------
 
 ALLOWED_ORIGIN = "https://dash-sa5phz.example.com"
 
@@ -28,15 +31,22 @@ app.add_middleware(
 )
 
 
-# Middleware
+# -----------------------------
+# Required headers middleware
+# -----------------------------
+
 class TimingMiddleware(BaseHTTPMiddleware):
+
     async def dispatch(self, request, call_next):
+
         start = time.perf_counter()
 
         response = await call_next(request)
 
+        elapsed = time.perf_counter() - start
+
         response.headers["X-Request-ID"] = str(uuid.uuid4())
-        response.headers["X-Process-Time"] = str(time.perf_counter() - start)
+        response.headers["X-Process-Time"] = str(elapsed)
 
         return response
 
@@ -44,11 +54,13 @@ class TimingMiddleware(BaseHTTPMiddleware):
 app.add_middleware(TimingMiddleware)
 
 
-# -----------------------------
-# Assignment 1
-# -----------------------------
+# ============================================================
+# Assignment 1: Metrics API
+# ============================================================
+
 @app.get("/stats")
 async def stats(values: str = Query(...)):
+
     numbers = [int(v.strip()) for v in values.split(",")]
 
     return {
@@ -61,9 +73,10 @@ async def stats(values: str = Query(...)):
     }
 
 
-# -----------------------------
-# Assignment 2
-# -----------------------------
+# ============================================================
+# Assignment 2: JWT Verification
+# ============================================================
+
 PUBLIC_KEY = """
 -----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2okOHspNjgA+2rTLbeuY
@@ -83,21 +96,12 @@ AUDIENCE = "tds-076621u5.apps.exam.local"
 class TokenRequest(BaseModel):
     token: str
 
-class Event(BaseModel):
-    user: str
-    amount: float
-    ts: int
-
-
-class AnalyticsRequest(BaseModel):
-    events: list[Event]
-
-AUDIENCE = "tds-076621u5.apps.exam.local"
-API_KEY = "ak_bjhm2nqfl5b8yf7w5357wlsm"
 
 @app.post("/verify")
 async def verify(request: TokenRequest):
+
     try:
+
         payload = jwt.decode(
             request.token,
             PUBLIC_KEY,
@@ -114,15 +118,19 @@ async def verify(request: TokenRequest):
         }
 
     except Exception:
+
         return JSONResponse(
             status_code=401,
-            content={"valid": False},
+            content={
+                "valid": False
+            }
         )
 
 
-# -----------------------------
-# Assignment 3
-# -----------------------------
+# ============================================================
+# Assignment 3: Effective Config
+# ============================================================
+
 DEFAULTS = {
     "port": 8000,
     "workers": 1,
@@ -133,81 +141,162 @@ DEFAULTS = {
 
 
 def to_bool(value):
-    return str(value).lower() in ("true", "1", "yes", "on")
+
+    return str(value).lower() in (
+        "true",
+        "1",
+        "yes",
+        "on"
+    )
 
 
 @app.get("/effective-config")
-async def effective_config(set: list[str] = Query(default=[])):
+async def effective_config(
+    set: list[str] = Query(default=[])
+):
 
-    # defaults
     config = DEFAULTS.copy()
 
-    # YAML
-    with open("config.development.yaml", "r") as f:
-        yaml_config = yaml.safe_load(f)
 
-    if yaml_config:
-        config.update(yaml_config)
+    # YAML layer
 
-    # .env
+    try:
+
+        with open("config.development.yaml", "r") as f:
+
+            yaml_config = yaml.safe_load(f)
+
+            if yaml_config:
+                config.update(yaml_config)
+
+    except FileNotFoundError:
+        pass
+
+
+
+    # .env layer
+
     env_file = dotenv_values(".env")
 
-    mapping = {
+    env_mapping = {
+
         "APP_PORT": "port",
         "APP_DEBUG": "debug",
         "APP_LOG_LEVEL": "log_level",
         "APP_API_KEY": "api_key",
         "NUM_WORKERS": "workers",
+
     }
 
-    for env_key, cfg_key in mapping.items():
-        if env_key in env_file and env_file[env_key] is not None:
-            config[cfg_key] = env_file[env_key]
 
-    # OS environment
-    mapping = {
+    for env_key, config_key in env_mapping.items():
+
+        if env_file.get(env_key) is not None:
+
+            config[config_key] = env_file[env_key]
+
+
+
+    # OS environment layer
+
+    os_mapping = {
+
         "APP_PORT": "port",
         "APP_WORKERS": "workers",
         "APP_DEBUG": "debug",
         "APP_LOG_LEVEL": "log_level",
         "APP_API_KEY": "api_key",
+
     }
 
-    for env_key, cfg_key in mapping.items():
+
+    for env_key, config_key in os_mapping.items():
+
         value = os.environ.get(env_key)
+
         if value is not None:
-            config[cfg_key] = value
+
+            config[config_key] = value
+
+
 
     # CLI overrides
+
     for item in set:
-        if "=" not in item:
-            continue
 
-        key, value = item.split("=", 1)
-        config[key] = value
+        if "=" in item:
 
-    # Type coercion
+            key, value = item.split("=", 1)
+
+            config[key] = value
+
+
+
+    # Type conversion
+
     config["port"] = int(config["port"])
     config["workers"] = int(config["workers"])
     config["debug"] = to_bool(config["debug"])
     config["log_level"] = str(config["log_level"])
 
-    # Secret masking
+
+
+    # Never expose secret
+
     config["api_key"] = "****"
 
+
     return config
+
+
+
+# ============================================================
+# Assignment 5: Analytics
+# ============================================================
+
+API_KEY = "ak_bjhm2nqfl5b8yf7w5357wlsm"
+
+
+
+class Event(BaseModel):
+
+    user: str
+    amount: float
+    ts: int
+
+
+
+class AnalyticsRequest(BaseModel):
+
+    events: list[Event]
+
+
+
 @app.post("/analytics")
 async def analytics(
     request: AnalyticsRequest,
-    x_api_key: str = Header(None),
+    x_api_key: str | None = Header(default=None),
 ):
 
     if x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized"
+        )
+
+
 
     total_events = len(request.events)
 
-    unique_users = len({event.user for event in request.events})
+
+    unique_users = len(
+        {
+            event.user
+            for event in request.events
+        }
+    )
+
 
     revenue = sum(
         event.amount
@@ -215,23 +304,37 @@ async def analytics(
         if event.amount > 0
     )
 
-    totals = {}
+
+    user_totals = {}
+
 
     for event in request.events:
+
         if event.amount > 0:
-            totals[event.user] = totals.get(event.user, 0) + event.amount
 
-    top_user = max(totals, key=totals.get) if totals else ""
+            user_totals[event.user] = (
+                user_totals.get(event.user, 0)
+                + event.amount
+            )
+
+
+    top_user = (
+        max(user_totals, key=user_totals.get)
+        if user_totals
+        else ""
+    )
+
 
     return {
+
         "email": "23f3004469@ds.study.iitm.ac.in",
+
         "total_events": total_events,
+
         "unique_users": unique_users,
+
         "revenue": revenue,
+
         "top_user": top_user,
-    }
-@app.get("/debug-cors")
-def debug_cors():
-    return {
-        "allowed_origin": ALLOWED_ORIGIN
+
     }
