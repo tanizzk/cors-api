@@ -79,6 +79,17 @@ AUDIENCE = "tds-076621u5.apps.exam.local"
 class TokenRequest(BaseModel):
     token: str
 
+class Event(BaseModel):
+    user: str
+    amount: float
+    ts: int
+
+
+class AnalyticsRequest(BaseModel):
+    events: list[Event]
+
+AUDIENCE = "tds-076621u5.apps.exam.local"
+API_KEY = "ak_bjhm2nqfl5b8yf7w5357wlsm"
 
 @app.post("/verify")
 async def verify(request: TokenRequest):
@@ -181,3 +192,37 @@ async def effective_config(set: list[str] = Query(default=[])):
     config["api_key"] = "****"
 
     return config
+@app.post("/analytics")
+async def analytics(
+    request: AnalyticsRequest,
+    x_api_key: str = Header(None),
+):
+
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    total_events = len(request.events)
+
+    unique_users = len({event.user for event in request.events})
+
+    revenue = sum(
+        event.amount
+        for event in request.events
+        if event.amount > 0
+    )
+
+    totals = {}
+
+    for event in request.events:
+        if event.amount > 0:
+            totals[event.user] = totals.get(event.user, 0) + event.amount
+
+    top_user = max(totals, key=totals.get) if totals else ""
+
+    return {
+        "email": "23f3004469@ds.study.iitm.ac.in",
+        "total_events": total_events,
+        "unique_users": unique_users,
+        "revenue": revenue,
+        "top_user": top_user,
+    }
