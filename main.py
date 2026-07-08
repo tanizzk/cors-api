@@ -15,8 +15,13 @@ from dotenv import dotenv_values
 app = FastAPI()
 
 # CORS (allow all for this assignment)
+from fastapi.middleware.cors import CORSMiddleware
+
+ALLOWED_ORIGIN = "https://dash-sa5phz.example.com"
+
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=[ALLOWED_ORIGIN],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -224,4 +229,9 @@ async def analytics(
         "unique_users": unique_users,
         "revenue": revenue,
         "top_user": top_user,
+    }
+@app.get("/debug-cors")
+def debug_cors():
+    return {
+        "allowed_origin": ALLOWED_ORIGIN
     }
