@@ -1,38 +1,38 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-
-from fastapi import HTTPException
-from pydantic import BaseModel
-import jwt
-
-import uuid
-import time
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+import jwt
+import os
+import time
+import uuid
+import yaml
+
+from dotenv import dotenv_values
 
 app = FastAPI()
 
-ALLOWED_ORIGIN = "https://dash-sa5phz.example.com"
-
+# CORS (allow all for this assignment)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[ALLOWED_ORIGIN],
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+# Middleware
 class TimingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         start = time.perf_counter()
 
         response = await call_next(request)
 
-        elapsed = time.perf_counter() - start
-
         response.headers["X-Request-ID"] = str(uuid.uuid4())
-        response.headers["X-Process-Time"] = str(elapsed)
+        response.headers["X-Process-Time"] = str(time.perf_counter() - start)
 
         return response
 
@@ -40,6 +40,9 @@ class TimingMiddleware(BaseHTTPMiddleware):
 app.add_middleware(TimingMiddleware)
 
 
+# -----------------------------
+# Assignment 1
+# -----------------------------
 @app.get("/stats")
 async def stats(values: str = Query(...)):
     numbers = [int(v.strip()) for v in values.split(",")]
@@ -50,9 +53,13 @@ async def stats(values: str = Query(...)):
         "sum": sum(numbers),
         "min": min(numbers),
         "max": max(numbers),
-        "mean": sum(numbers) / len(numbers)
+        "mean": sum(numbers) / len(numbers),
     }
 
+
+# -----------------------------
+# Assignment 2
+# -----------------------------
 PUBLIC_KEY = """
 -----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2okOHspNjgA+2rTLbeuY
@@ -68,14 +75,14 @@ dQIDAQAB
 ISSUER = "https://idp.exam.local"
 AUDIENCE = "tds-076621u5.apps.exam.local"
 
+
 class TokenRequest(BaseModel):
     token: str
 
+
 @app.post("/verify")
 async def verify(request: TokenRequest):
-
     try:
-
         payload = jwt.decode(
             request.token,
             PUBLIC_KEY,
@@ -96,4 +103,81 @@ async def verify(request: TokenRequest):
             status_code=401,
             content={"valid": False},
         )
-    
+
+
+# -----------------------------
+# Assignment 3
+# -----------------------------
+DEFAULTS = {
+    "port": 8000,
+    "workers": 1,
+    "debug": False,
+    "log_level": "info",
+    "api_key": "default-secret-000",
+}
+
+
+def to_bool(value):
+    return str(value).lower() in ("true", "1", "yes", "on")
+
+
+@app.get("/effective-config")
+async def effective_config(set: list[str] = Query(default=[])):
+
+    # defaults
+    config = DEFAULTS.copy()
+
+    # YAML
+    with open("config.development.yaml", "r") as f:
+        yaml_config = yaml.safe_load(f)
+
+    if yaml_config:
+        config.update(yaml_config)
+
+    # .env
+    env_file = dotenv_values(".env")
+
+    mapping = {
+        "APP_PORT": "port",
+        "APP_DEBUG": "debug",
+        "APP_LOG_LEVEL": "log_level",
+        "APP_API_KEY": "api_key",
+        "NUM_WORKERS": "workers",
+    }
+
+    for env_key, cfg_key in mapping.items():
+        if env_key in env_file and env_file[env_key] is not None:
+            config[cfg_key] = env_file[env_key]
+
+    # OS environment
+    mapping = {
+        "APP_PORT": "port",
+        "APP_WORKERS": "workers",
+        "APP_DEBUG": "debug",
+        "APP_LOG_LEVEL": "log_level",
+        "APP_API_KEY": "api_key",
+    }
+
+    for env_key, cfg_key in mapping.items():
+        value = os.environ.get(env_key)
+        if value is not None:
+            config[cfg_key] = value
+
+    # CLI overrides
+    for item in set:
+        if "=" not in item:
+            continue
+
+        key, value = item.split("=", 1)
+        config[key] = value
+
+    # Type coercion
+    config["port"] = int(config["port"])
+    config["workers"] = int(config["workers"])
+    config["debug"] = to_bool(config["debug"])
+    config["log_level"] = str(config["log_level"])
+
+    # Secret masking
+    config["api_key"] = "****"
+
+    return config
